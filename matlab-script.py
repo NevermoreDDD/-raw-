@@ -114,7 +114,7 @@ class SavePng():
         # print(root_file)
         if len(root_file) != 0:
             i = re.split(r'/',filepath)[-1]
-            print(i)
+            print("目标文件夹前缀：", i)
             while i in exist_save:
                 i = input("该文件已存在于savepath中，请写一个新名字（只能用英文或者数字）:")
             self._select_resolution(filepath)
