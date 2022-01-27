@@ -1,9 +1,16 @@
+import cv2
 import matlab
 import matlab.engine
 import os
 import re
 import glob
+from process_raw import RawFile
+# import auto_concact_png
 from collections import defaultdict
+import multiprocessing
+from multiprocessing import Pool
+from tqdm import tqdm
+
 
 # PATH = '//192/home/fullv/workspace/projects/NeuralNetWork/MMSegmentation_Tutorial.ipynb.168.2.58/weld_data_line/temppp/A-04/A-10'
 # files = glob.glob(PATH+'/*'+'.raw')
@@ -42,7 +49,7 @@ from collections import defaultdict
 class ResolutionException(Exception):
     pass
 
-class SavePng():
+class SavePng:
     def __init__(self, pathF=None, savepath=None, width=None, height=None, bit=None):
         """
         传入matlab的参数
@@ -83,6 +90,11 @@ class SavePng():
                 self.width = 1056
                 self.height = 1920
                 self.bit = 'uint8'
+                break
+            elif round(os.stat(file).st_size / 1024) in [2969, 2970, 2971]:
+                self.width = 1440
+                self.height = 1056
+                self.bit = 'uint16'
                 break
             else:
                 # 如果文件不满足预设的条件，抛出异常
@@ -125,7 +137,7 @@ class SavePng():
         return
 
     def connect_matlab(self,dir):
-        print('即将读取的目录： {},这里有{}张图片，目前设定最多只会读取300张图片，如需要请更改load_raw_File.m'.format(dir,len(glob.glob(dir + '/*' + '.raw'))))
+        print('即将读取的目录： {},这里有{}张图片，目前设定最多只会读取300张图片，如需要请更改load_raw_File.m'.format(dir, len(glob.glob(dir + '/*' + '.raw'))))
         # check = input()
         # if check.lower() == 'y':
         with open("loadFile.txt",'w',encoding='utf-8') as f:
@@ -140,8 +152,9 @@ class SavePng():
         return
         # else:
         #     return
-    def start(self):
-        pass
+
+
+
 if __name__ == '__main__':
     savepath = input("请输入储存数据的目录（绝对路径）：").replace("\\", '/')
     # 全局变量，用来应对重名文件过多的问题
@@ -152,7 +165,5 @@ if __name__ == '__main__':
         if workdir == '':
             break
         a = SavePng(savepath=savepath)
-        a.set_parameter(workdir,handle_duplicate)
+        a.set_parameter(workdir, handle_duplicate)
         del a
-
-

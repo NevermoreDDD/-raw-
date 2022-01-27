@@ -16,10 +16,10 @@ def main(filepath,save_path):
 
     root_file = []
     for item in file_list:
-        path = os.path.join(filepath,item)
+        path = os.path.join(filepath, item)
         if os.path.isdir(path):
-            main(path,save_path)
-        elif len(re.findall(r"\.png$", item)) != 0:
+            main(path, save_path)
+        elif len(re.findall(r"\.png$|\.jpg$", item)) != 0:
             root_file.append(path)
     # print(root_file)
     if len(root_file) != 0:
@@ -31,12 +31,12 @@ def main(filepath,save_path):
                 data = f.read()
                 md.update(data)
                 file_name = md.hexdigest()
-            with open(os.path.join(save_path,file_name+'.png'),'wb') as f:
+            with open(os.path.join(save_path, file_name+'.png'), 'wb') as f:
                 f.write(data)
     return
 
 print("请输入PNG文件路径（只能处理PNG文件）：")
-filepath = input().replace("\\","/")
+filepath = input().replace("\\", "/")
 print("请输入存储路径： ")
-save_path = input().replace("\\","/")
-main(filepath,save_path)
+save_path = input().replace("\\", "/")
+main(filepath, save_path)
