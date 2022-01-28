@@ -11,16 +11,43 @@ from tqdm import tqdm
 import time
 from datetime import datetime
 
+"""
+def _get_last_line(filename):
+    get last line of a file
+    :param filename: file name
+    :return: last line or None for empty file
+    try:
+        filesize = os.path.getsize(filename)
+        if filesize == 0:
+            return None
+        else:
+            with open(filename, 'rb') as fp:  # to use seek from end, must use mode 'rb'
+                offset = -8  # initialize offset
+                while -offset < filesize:  # offset cannot exceed file size
+                    fp.seek(offset, 2)  # read # offset chars from eof(represent by number '2')
+                    lines = fp.readlines()  # read from fp to eof
+                    if len(lines) >= 2:  # if contains at least 2 lines
+                        return lines[-1]  # then last line is totally included
+                    else:
+                        offset *= 2  # enlarge offset
+                fp.seek(0)
+                lines = fp.readlines()
+                return lines[-1]
+    except FileNotFoundError:
+        print(filename + ' not found!')
+        return None
+"""
+
 
 class Logger:
     def __init__(self, flevel=logging.INFO, clevel=logging.INFO):
-        self.logger = logging.getLogger('auto-process.log')
+        self.logger = logging.getLogger('test.log')
         self.logger.setLevel(logging.INFO)
         fmt = logging.Formatter('[%(asctime)s] [%(levelname)s] %(process)d %(message)s ', '%Y-%m-%d %H:%M:%S')
         ch = logging.StreamHandler()
         ch.setFormatter(fmt)
         ch.setLevel(clevel)
-        fh = logging.handlers.TimedRotatingFileHandler('auto_process.log', when='H', interval=1, backupCount=3)
+        fh = logging.handlers.TimedRotatingFileHandler('test.log', when='H', interval=1, backupCount=3)
         fh.namer = lambda x: x.split('.')[0]
         fh.suffix = "%Y-%m-%d_%H.log"
         fh.setFormatter(fmt)
@@ -44,32 +71,18 @@ class Logger:
         self.logger.critical(message)
 
 
-def _get_last_line(filename):
-    """
-    get last line of a file
-    :param filename: file name
-    :return: last line or None for empty file
-    """
-    try:
-        filesize = os.path.getsize(filename)
-        if filesize == 0:
-            return None
-        else:
-            with open(filename, 'rb') as fp:  # to use seek from end, must use mode 'rb'
-                offset = -8  # initialize offset
-                while -offset < filesize:  # offset cannot exceed file size
-                    fp.seek(offset, 2)  # read # offset chars from eof(represent by number '2')
-                    lines = fp.readlines()  # read from fp to eof
-                    if len(lines) >= 2:  # if contains at least 2 lines
-                        return lines[-1]  # then last line is totally included
-                    else:
-                        offset *= 2  # enlarge offset
-                fp.seek(0)
-                lines = fp.readlines()
-                return lines[-1]
-    except FileNotFoundError:
-        print(filename + ' not found!')
-        return None
+class NoDaemonProcess(multiprocessing.Process):
+    def _get_daemon(self):
+        return False
+
+    def _set_daemon(self, value):
+        pass
+
+    daemon = property(_get_daemon, _set_daemon)
+
+
+class MyPool(multiprocessing.pool.Pool):
+    Process = NoDaemonProcess
 
 
 def main():
@@ -77,7 +90,8 @@ def main():
     # 全局变量，用来应对重名文件过多的问题
     handle_duplicate = 0
     logger_ = Logger()
-    pool = Pool(4)
+    num_cores = multiprocessing.cpu_count()
+    pool = MyPool(num_cores)
     workdir = input('输入源文件的绝对路径(直接按回车可以停止脚本): ').replace("\\", '/')
     if workdir == '':
         return
@@ -92,14 +106,16 @@ def main():
     # 这里要读日志，然后获取已经处理过的文件夹，如果存在在日志中，就跳过
     log_files = glob.glob(os.getcwd() + "/*" + '.log')
     log_files.sort(key=lambda x: re.findall(r'(?<=auto_process).*(?=.log)', x)[0])
-    with open(log_files[-1], 'r') as l:
-        try:
-            logs = l.readlines()
-            data = ' '.join(logs)
-            done_list = re.findall(r'(?<=Work done: ).*(?= finished)', data)
-        except IndexError:
-            done_list = []
-    set_parameter(workdir, logger_, savepath, done_list, exist_save, pool, )
+    done_list = []
+    for log in log_files:
+        with open(log, 'r') as l:
+            try:
+                logs = l.readlines()
+                data = ' '.join(logs)
+                done_list += re.findall(r'(?<=Work done: ).*(?= finished)', data)
+            except IndexError:
+                done_list = []
+    set_parameter(workdir, logger_, savepath, done_list, exist_save, pool, handle_duplicate)
 
 
 def select_resolution(files, logger):
@@ -156,8 +172,8 @@ def select_resolution(files, logger):
     return 0, 0, 0
 
 
-def set_parameter(filepath, logger, savepath, done_list, exist_save, handle_duplicate=None):
-    process_id = os.getpid()
+def set_parameter(filepath, logger, savepath, done_list, exist_save, pool, handle_duplicate=0):
+    pool.starmap(recursive_func, [filepath, logger, savepath, done_list, exist_save, pool, handle_duplicate])
     # 获取源目录下的所有文件
     file_list = os.listdir(filepath)
     # print(file_list)
@@ -168,7 +184,7 @@ def set_parameter(filepath, logger, savepath, done_list, exist_save, handle_dupl
         if os.path.isdir(path):
             if path in done_list:
                 continue
-            set_parameter(path, logger, savepath, handle_duplicate)
+            set_parameter(path, logger, savepath, handle_duplicate, done_list, exist_save)
         elif len(re.findall(r"\.raw$", item)) != 0:
             root_file.append(item)
     # print(root_file)
@@ -182,7 +198,10 @@ def set_parameter(filepath, logger, savepath, done_list, exist_save, handle_dupl
         # 会自动在结尾加上一个数字，这个数字不一定是连续的
         os.mkdir(save_path)
         width, height, bit = select_resolution(filepath, logger)
+        if width == height == bit == 0:
+            return
         connect_matlab(filepath, logger, save_path, bit, width, height)
+    pool.join()
     return
 
 
