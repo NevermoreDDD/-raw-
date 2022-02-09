@@ -6,8 +6,9 @@ import logging
 import logging.handlers
 from process_raw import RawFile
 import multiprocessing
-from multiprocessing import Pool
+from multiprocessing.pool import Pool
 from tqdm import tqdm
+import warnings
 import time
 from datetime import datetime
 
@@ -81,7 +82,7 @@ class NoDaemonProcess(multiprocessing.Process):
     daemon = property(_get_daemon, _set_daemon)
 
 
-class MyPool(multiprocessing.pool.Pool):
+class MyPool(Pool):
     Process = NoDaemonProcess
 
 
@@ -90,6 +91,8 @@ def main():
     # 全局变量，用来应对重名文件过多的问题
     handle_duplicate = 0
     logger_ = Logger()
+    global logs
+    logs_ = logger_
     num_cores = multiprocessing.cpu_count()
     pool = MyPool(num_cores)
     workdir = input('输入源文件的绝对路径(直接按回车可以停止脚本): ').replace("\\", '/')
@@ -105,17 +108,21 @@ def main():
     exist_save = [x for x in re.findall(r"[^ ]*(?=ScaleRaw|Scale512)", " ".join(exist_save)) if x != '']
     # 这里要读日志，然后获取已经处理过的文件夹，如果存在在日志中，就跳过
     log_files = glob.glob(os.getcwd() + "/*" + '.log')
-    log_files.sort(key=lambda x: re.findall(r'(?<=auto_process).*(?=.log)', x)[0])
-    done_list = []
-    for log in log_files:
-        with open(log, 'r') as l:
-            try:
-                logs = l.readlines()
-                data = ' '.join(logs)
-                done_list += re.findall(r'(?<=Work done: ).*(?= finished)', data)
-            except IndexError:
-                done_list = []
-    set_parameter(workdir, logger_, savepath, done_list, exist_save, pool, handle_duplicate)
+    try:
+        log_files.sort(key=lambda x: re.findall(r'(?<=auto_process).*(?=.log)', x)[0])
+    except IndexError:
+        warnings.warn("Something happens in sorting log files. ")
+    finally:
+        done_list = []
+        for log in log_files:
+            with open(log, 'r') as l:
+                try:
+                    logs = l.readlines()
+                    data = ' '.join(logs)
+                    done_list += re.findall(r'(?<=Work done: ).*(?= finished)', data)
+                except IndexError:
+                    done_list = []
+        set_parameter(workdir, logs_, savepath, done_list, exist_save, pool, handle_duplicate)
 
 
 def select_resolution(files, logger):
@@ -164,6 +171,11 @@ def select_resolution(files, logger):
             height = 1080
             bit = 'uint16'
             return width, height, bit
+        elif round(os.stat(file).st_size / 1024) in [1319, 1320, 1321]:
+            width = 1056
+            height = 1280
+            bit = 'uint8'
+            return width, height, bit
         else:
             # 如果文件不满足预设的条件，抛出异常
             logger.error(f"{file} size of {round(os.stat(file).st_size / 1024)} KB. Please Check Manually")
@@ -173,7 +185,6 @@ def select_resolution(files, logger):
 
 
 def set_parameter(filepath, logger, savepath, done_list, exist_save, pool, handle_duplicate=0):
-    pool.starmap(recursive_func, [filepath, logger, savepath, done_list, exist_save, pool, handle_duplicate])
     # 获取源目录下的所有文件
     file_list = os.listdir(filepath)
     # print(file_list)
@@ -184,7 +195,7 @@ def set_parameter(filepath, logger, savepath, done_list, exist_save, pool, handl
         if os.path.isdir(path):
             if path in done_list:
                 continue
-            set_parameter(path, logger, savepath, handle_duplicate, done_list, exist_save)
+            set_parameter(path, logger, savepath, done_list, exist_save, pool,handle_duplicate)
         elif len(re.findall(r"\.raw$", item)) != 0:
             root_file.append(item)
     # print(root_file)
@@ -200,8 +211,7 @@ def set_parameter(filepath, logger, savepath, done_list, exist_save, pool, handl
         width, height, bit = select_resolution(filepath, logger)
         if width == height == bit == 0:
             return
-        connect_matlab(filepath, logger, save_path, bit, width, height)
-    pool.join()
+        connect_matlab(filepath, logger, save_path, bit, width, height, pool)
     return
 
 
@@ -209,42 +219,52 @@ def recursive_func(*args):
     set_parameter(*args)
 
 
-def connect_matlab(directory, logger, save_path, bit, width, height):
+def connect_matlab(directory, logger, save_path, bit, width, height, pool):
     image_list = glob.glob(directory + '/*' + '.raw')
     number_image = len(image_list)
     print('即将读取的目录： {},这里有{}张图片，目前设定最多只会读取300张图片'.format(directory, number_image))
     # 这里从日志里面获取编号、给PNG标上
     log_files = glob.glob(os.getcwd() + "/*" + '.log')
-    log_files.sort(key=lambda x: re.findall(r'(?<=auto_process).*(?=.log)', x)[0])
-    if len(log_files) != 0:
-        with open(log_files[-1], 'r') as l:
-            try:
-                logs = l.readlines()
-                for index in range(-1, -len(logs), -1):
-                    img_id = re.findall(r"(?<=FINAL ID: ).*(?= )", logs[index])[-1]
-                    if img_id == "":
-                        continue
-                    else:
-                        break
-            except IndexError:
-                img_id = 0
-    else:
-        img_id = 0
-    true_id = int(img_id)
-    iter_time = 300 if number_image > 300 else number_image
-    for index in tqdm(range(iter_time)):
-        raw_handler = RawFile(img_path=image_list[index], dtype=bit, width=width, height=height, logger=logger)
-        image = raw_handler.handle_img()
-        if type(image) is not None:
-            try:
-                cv2.imencode('.png', image)[1].tofile(os.path.join(save_path, ("{:0>7d}".format(true_id))) + '.png')
-            except cv2.error:
-                logger.error(f"{directory}中出现错误，请检查")
-        true_id += 1
-    # self.engine.savePng(nargout=0)
-    logger.info(f"Work done: {directory} finished, FINAL ID: {true_id} ")
-    print("执行完毕")
-    return
+    try:
+        log_files.sort(key=lambda x: re.findall(r'(?<=auto_process).*(?=.log)', x)[0])
+    except IndexError:
+        pass
+    finally:
+        if len(log_files) != 0:
+            with open(log_files[-1], 'r') as l:
+                try:
+                    logs = l.readlines()
+                    if len(logs) == 0:
+                        img_id = 0
+                    for index in range(-1, -len(logs)-1, -1):
+                        img_id = re.findall(r"(?<=FINAL ID: ).*(?= )", logs[index])[-1]
+                        if img_id == "":
+                            continue
+                        else:
+                            break
+                except IndexError:
+                    img_id = 0
+        else:
+            img_id = 0
+        true_id = int(img_id)
+        iter_time = 300 if number_image > 300 else number_image
+        for index in tqdm(range(iter_time)):
+            raw_handler = RawFile(img_path=image_list[index], dtype=bit, width=width, height=height, logger=logger)
+            images = []
+            pool.apply_async(raw_handler.handle_img, callback=images.append)
+            for image in images:
+                if type(image) is not None:
+                    try:
+                        cv2.imencode('.png', image)[1].tofile(os.path.join(save_path, ("{:0>7d}".format(true_id))) + '.png')
+                    except cv2.error:
+                        logger.error(f"{directory}中出现错误，请检查")
+            true_id += 1
+        pool.close()
+        pool.join()
+        # self.engine.savePng(nargout=0)
+        logger.info(f"Work done: {directory} finished, FINAL ID: {true_id} ")
+        print("执行完毕")
+        return
     # else:
     #     return
 
