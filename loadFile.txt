@@ -1,6 +1,0 @@
-\\192.168.2.58\weld_data_line\temppp\N-01\N-06
-D:\matlab_images
-N-06
-1440
-1080
-uint16
