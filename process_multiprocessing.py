@@ -4,7 +4,7 @@ import re
 import glob
 import logging
 import logging.handlers
-from process_raw import RawFile
+from process_raw import RawFile, multiple_working
 import multiprocessing
 from multiprocessing.pool import Pool
 from tqdm import tqdm
@@ -42,13 +42,13 @@ def _get_last_line(filename):
 
 class Logger:
     def __init__(self, flevel=logging.INFO, clevel=logging.INFO):
-        self.logger = logging.getLogger('test.log')
+        self.logger = logging.getLogger('auto_process.log')
         self.logger.setLevel(logging.INFO)
         fmt = logging.Formatter('[%(asctime)s] [%(levelname)s] %(process)d %(message)s ', '%Y-%m-%d %H:%M:%S')
         ch = logging.StreamHandler()
         ch.setFormatter(fmt)
         ch.setLevel(clevel)
-        fh = logging.handlers.TimedRotatingFileHandler('test.log', when='H', interval=1, backupCount=3)
+        fh = logging.handlers.TimedRotatingFileHandler('auto_process.log', when='H', interval=1, backupCount=3)
         fh.namer = lambda x: x.split('.')[0]
         fh.suffix = "%Y-%m-%d_%H.log"
         fh.setFormatter(fmt)
@@ -215,14 +215,14 @@ def set_parameter(filepath, logger, savepath, done_list, exist_save, pool, handl
     return
 
 
-def recursive_func(*args):
+def recursive_func(args):
     set_parameter(*args)
 
 
 def connect_matlab(directory, logger, save_path, bit, width, height, pool):
     image_list = glob.glob(directory + '/*' + '.raw')
     number_image = len(image_list)
-    print('即将读取的目录： {},这里有{}张图片，目前设定最多只会读取300张图片'.format(directory, number_image))
+    print('即将读取的目录： {},这里有{}张图片，目前设定最多只会读取1000张图片'.format(directory, number_image))
     # 这里从日志里面获取编号、给PNG标上
     log_files = glob.glob(os.getcwd() + "/*" + '.log')
     try:
@@ -247,17 +247,17 @@ def connect_matlab(directory, logger, save_path, bit, width, height, pool):
         else:
             img_id = 0
         true_id = int(img_id)
-        iter_time = 300 if number_image > 300 else number_image
+        iter_time = 1000 if number_image > 1000 else number_image
         for index in tqdm(range(iter_time)):
             raw_handler = RawFile(img_path=image_list[index], dtype=bit, width=width, height=height, logger=logger)
             images = []
-            pool.apply_async(raw_handler.handle_img, callback=images.append)
-            for image in images:
-                if type(image) is not None:
-                    try:
-                        cv2.imencode('.png', image)[1].tofile(os.path.join(save_path, ("{:0>7d}".format(true_id))) + '.png')
-                    except cv2.error:
-                        logger.error(f"{directory}中出现错误，请检查")
+            image = pool.apply_async(multiple_working(raw_handler))
+            print(image)
+            if not isinstance(image, type(None)):
+                try:
+                    cv2.imencode('.png', image)[1].tofile(os.path.join(save_path, ("{:0>7d}".format(true_id))) + '.png')
+                except cv2.error:
+                    logger.error(f"{directory}中出现错误，请检查")
             true_id += 1
         pool.close()
         pool.join()

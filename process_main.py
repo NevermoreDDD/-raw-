@@ -5,6 +5,7 @@ import glob
 import logging
 import logging.handlers
 from process_raw import RawFile
+import random
 from tqdm import tqdm
 
 
@@ -119,6 +120,11 @@ def select_resolution(files, logger):
             height = 1080
             bit = 'uint16'
             return width, height, bit
+        elif round(os.stat(file).st_size / 1024) in [1319, 1320, 1321]:
+            width = 1056
+            height = 1280
+            bit = 'uint8'
+            return width, height, bit
         else:
             # 如果文件不满足预设的条件，抛出异常
             logger.error(f"{file} size of {round(os.stat(file).st_size / 1024)} KB. Please Check Manually")
@@ -161,6 +167,7 @@ def set_parameter(filepath, logger, savepath: str, handle_duplicate=None):
                 try:
                     logs = l.readlines()
                     data = ' '.join(logs)
+                    # print(re.findall(r'(?<=Work done: ).*(?= finished)', data))
                     done_list += re.findall(r'(?<=Work done: ).*(?= finished)', data)
                 except IndexError:
                     done_list = []
@@ -215,7 +222,7 @@ def process_raw(directory, logger, save_path, bit, width, height):
         else:
             img_id = 0
         true_id = int(img_id)
-        iter_time = 1000 if number_image > 1000 else number_image
+        iter_time = 2000 if number_image > 2000 else number_image
         for index in tqdm(range(iter_time)):
             raw_handler = RawFile(img_path=image_list[index], dtype=bit, width=width, height=height, logger=logger)
             image = raw_handler.handle_img()
@@ -231,11 +238,11 @@ def process_raw(directory, logger, save_path, bit, width, height):
 
 
 if __name__ == '__main__':
-    savepath = input("请输入储存数据的目录（绝对路径）：").replace("\\", '/')
     # 全局变量，用来应对重名文件过多的问题
     handle_duplicate = 0
     logger_ = Logger()
     while True:
+        savepath = input("请输入储存数据的目录（绝对路径）：").replace("\\", '/')
         workdir = input('输入源文件的绝对路径(直接按回车可以停止脚本): ').replace("\\", '/')
         if workdir == '':
             break
