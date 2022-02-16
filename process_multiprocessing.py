@@ -4,52 +4,62 @@ import re
 import glob
 import logging
 import logging.handlers
-from process_raw import RawFile, multiple_working
-import multiprocessing
-from multiprocessing.pool import Pool
-from tqdm import tqdm
+import hashlib
+import random
 import warnings
-import time
-from datetime import datetime
+import multiprocessing
+from multiprocessing import Pool
+from tqdm import tqdm
+import numpy as np
 
-"""
-def _get_last_line(filename):
-    get last line of a file
-    :param filename: file name
-    :return: last line or None for empty file
-    try:
-        filesize = os.path.getsize(filename)
-        if filesize == 0:
-            return None
-        else:
-            with open(filename, 'rb') as fp:  # to use seek from end, must use mode 'rb'
-                offset = -8  # initialize offset
-                while -offset < filesize:  # offset cannot exceed file size
-                    fp.seek(offset, 2)  # read # offset chars from eof(represent by number '2')
-                    lines = fp.readlines()  # read from fp to eof
-                    if len(lines) >= 2:  # if contains at least 2 lines
-                        return lines[-1]  # then last line is totally included
-                    else:
-                        offset *= 2  # enlarge offset
-                fp.seek(0)
-                lines = fp.readlines()
-                return lines[-1]
-    except FileNotFoundError:
-        print(filename + ' not found!')
+
+def handle_img(dtype, img_path, width, height):
+    img_data = np.fromfile(img_path, dtype)
+    dtype = np.uint8 if dtype == 'uint8' else np.uint16
+    if img_data is None:
         return None
-"""
+    try:
+        img_data = img_data.reshape(height, width, 1)
+    except ValueError as e:
+        warnings.warn(f"{img_path} has something wrong")
+        return None
+    else:
+        if dtype == np.uint16:
+            img = (img_data / 256).astype('uint8')
+        else:
+            img = img_data
+        img_guassian = cv2.GaussianBlur(img, (5, 5), 1)
+        # plt.imshow(img_guassian, cmap="gray")
+        # plt.show()
+        # print(img_guassian)
+        if dtype == np.uint8:
+            img_gamma = img_guassian
+        else:
+            img_gamma = np.power(img / 4 / float(np.max(img_guassian)), 0.45)
+            img_gamma = (img_gamma * 255).astype('uint8')
+        img_guassian = cv2.GaussianBlur(img_gamma, (5, 5), 1)
+        img_raw = cv2.resize(img_guassian, dsize=(width, height), interpolation=cv2.INTER_CUBIC)
+        if dtype == np.uint8:
+            img_raw = cv2.transpose(img_raw)
+        # img_512 = cv2.cvtColor(img_512, cv2.COLOR_BGR2GRAY)
+        # cv2.imshow("image", img_raw)
+        # cv2.waitKey(0)
+        # plt.imshow(img_512,cmap="gray")
+        # plt.show()
+        # print((img_512.dtype))
+        return img_raw
 
 
 class Logger:
     def __init__(self, flevel=logging.INFO, clevel=logging.INFO):
-        self.logger = logging.getLogger('auto_process.log')
+        self.logger = logging.getLogger('auto-process.log')
         self.logger.setLevel(logging.INFO)
         fmt = logging.Formatter('[%(asctime)s] [%(levelname)s] %(process)d %(message)s ', '%Y-%m-%d %H:%M:%S')
         ch = logging.StreamHandler()
         ch.setFormatter(fmt)
         ch.setLevel(clevel)
-        fh = logging.handlers.TimedRotatingFileHandler('auto_process.log', when='H', interval=1, backupCount=3)
-        fh.namer = lambda x: x.split('.')[0]
+        fh = logging.handlers.TimedRotatingFileHandler('auto_process.log', when='H', interval=1)
+        # fh.namer = lambda x: x.split('.')[1]
         fh.suffix = "%Y-%m-%d_%H.log"
         fh.setFormatter(fmt)
         fh.setLevel(flevel)
@@ -72,60 +82,7 @@ class Logger:
         self.logger.critical(message)
 
 
-class NoDaemonProcess(multiprocessing.Process):
-    def _get_daemon(self):
-        return False
-
-    def _set_daemon(self, value):
-        pass
-
-    daemon = property(_get_daemon, _set_daemon)
-
-
-class MyPool(Pool):
-    Process = NoDaemonProcess
-
-
-def main():
-    savepath = input("请输入储存数据的目录（绝对路径）：").replace("\\", '/')
-    # 全局变量，用来应对重名文件过多的问题
-    handle_duplicate = 0
-    logger_ = Logger()
-    global logs
-    logs_ = logger_
-    num_cores = multiprocessing.cpu_count()
-    pool = MyPool(num_cores)
-    workdir = input('输入源文件的绝对路径(直接按回车可以停止脚本): ').replace("\\", '/')
-    if workdir == '':
-        return
-    save_dir = os.listdir(savepath)
-    exist_save = []
-    for save in save_dir:
-        save_path = savepath + '/' + save
-        if os.path.isdir(save_path):
-            exist_save.append(save)
-            # print(exist_save)
-    exist_save = [x for x in re.findall(r"[^ ]*(?=ScaleRaw|Scale512)", " ".join(exist_save)) if x != '']
-    # 这里要读日志，然后获取已经处理过的文件夹，如果存在在日志中，就跳过
-    log_files = glob.glob(os.getcwd() + "/*" + '.log')
-    try:
-        log_files.sort(key=lambda x: re.findall(r'(?<=auto_process).*(?=.log)', x)[0])
-    except IndexError:
-        warnings.warn("Something happens in sorting log files. ")
-    finally:
-        done_list = []
-        for log in log_files:
-            with open(log, 'r') as l:
-                try:
-                    logs = l.readlines()
-                    data = ' '.join(logs)
-                    done_list += re.findall(r'(?<=Work done: ).*(?= finished)', data)
-                except IndexError:
-                    done_list = []
-        set_parameter(workdir, logs_, savepath, done_list, exist_save, pool, handle_duplicate)
-
-
-def select_resolution(files, logger):
+def select_resolution(files):
     """
     根据图片大小选择合适的分辨率和比特
     """
@@ -161,6 +118,11 @@ def select_resolution(files, logger):
             height = 1056
             bit = 'uint16'
             return width, height, bit
+        elif round(os.stat(file).st_size / 1024) in [3959, 3960, 3961]:
+            width = 1920
+            height = 1056
+            bit = 'uint16'
+            return width, height, bit
         elif round(os.stat(file).st_size / 1024) in [2679, 2680, 2681]:
             width = 1280
             height = 1072
@@ -178,96 +140,117 @@ def select_resolution(files, logger):
             return width, height, bit
         else:
             # 如果文件不满足预设的条件，抛出异常
-            logger.error(f"{file} size of {round(os.stat(file).st_size / 1024)} KB. Please Check Manually")
+            # logger.error(f"{file} size of {round(os.stat(file).st_size / 1024)} KB. Please Check Manually")
+            print(f"{file} size of {round(os.stat(file).st_size / 1024)} KB. Please Check Manually")
             continue
-    logger.error(f"{files} has totally new resolution")
+    # logger.error(f"{files} has totally new resolution")
     return 0, 0, 0
 
 
-def set_parameter(filepath, logger, savepath, done_list, exist_save, pool, handle_duplicate=0):
+def set_parameter(filepath, savepath: str, handle_duplicate=None):
+    """
+    设定需要传入matlab的参数并且调用matlab脚本
+    :param handle_duplicate:
+    :param filepath:
+    :type savepath: str
+    """
+    process_id = os.getpid()
+
     # 获取源目录下的所有文件
     file_list = os.listdir(filepath)
     # print(file_list)
     # 获取存储路径下的所有文件的名字
-    root_file = []
-    for item in file_list:
-        path = filepath + '/' + item
-        if os.path.isdir(path):
-            if path in done_list:
-                continue
-            set_parameter(path, logger, savepath, done_list, exist_save, pool,handle_duplicate)
-        elif len(re.findall(r"\.raw$", item)) != 0:
-            root_file.append(item)
-    # print(root_file)
-    if len(root_file) != 0:
-        i = re.split(r'/', filepath)[-1]
-        print("目标文件夹前缀：", i)
-        while i in exist_save:
-            i += str(handle_duplicate)
-            handle_duplicate += 1
-        save_path = os.path.join(savepath, i + 'ScaleRaw')
-        # 会自动在结尾加上一个数字，这个数字不一定是连续的
-        os.mkdir(save_path)
-        width, height, bit = select_resolution(filepath, logger)
-        if width == height == bit == 0:
-            return
-        connect_matlab(filepath, logger, save_path, bit, width, height, pool)
-    return
-
-
-def recursive_func(args):
-    set_parameter(*args)
-
-
-def connect_matlab(directory, logger, save_path, bit, width, height, pool):
-    image_list = glob.glob(directory + '/*' + '.raw')
-    number_image = len(image_list)
-    print('即将读取的目录： {},这里有{}张图片，目前设定最多只会读取1000张图片'.format(directory, number_image))
-    # 这里从日志里面获取编号、给PNG标上
+    save_dir = os.listdir(savepath)
+    exist_save = []
+    for save in save_dir:
+        save_path = savepath + '/' + save
+        if os.path.isdir(save_path):
+            exist_save.append(save)
+            # print(exist_save)
+    exist_save = [x for x in re.findall(r"[^ ]*(?=ScaleRaw|Scale512)", " ".join(exist_save)) if x != '']
+    # 这里要读日志，然后获取已经处理过的文件夹，如果存在在日志中，就跳过
     log_files = glob.glob(os.getcwd() + "/*" + '.log')
     try:
         log_files.sort(key=lambda x: re.findall(r'(?<=auto_process).*(?=.log)', x)[0])
     except IndexError:
         pass
     finally:
-        if len(log_files) != 0:
-            with open(log_files[-1], 'r') as l:
+        done_list = []
+        for log in log_files:
+            with open(log, 'r') as l:
                 try:
                     logs = l.readlines()
-                    if len(logs) == 0:
-                        img_id = 0
-                    for index in range(-1, -len(logs)-1, -1):
-                        img_id = re.findall(r"(?<=FINAL ID: ).*(?= )", logs[index])[-1]
-                        if img_id == "":
-                            continue
-                        else:
-                            break
+                    data = ' '.join(logs)
+                    # print(re.findall(r'(?<=Work done: ).*(?= finished)', data))
+                    done_list += re.findall(r'(?<=Work done: ).*(?= finished)', data)
                 except IndexError:
-                    img_id = 0
-        else:
-            img_id = 0
-        true_id = int(img_id)
-        iter_time = 1000 if number_image > 1000 else number_image
-        for index in tqdm(range(iter_time)):
-            raw_handler = RawFile(img_path=image_list[index], dtype=bit, width=width, height=height, logger=logger)
-            images = []
-            image = pool.apply_async(multiple_working(raw_handler))
-            print(image)
-            if not isinstance(image, type(None)):
-                try:
-                    cv2.imencode('.png', image)[1].tofile(os.path.join(save_path, ("{:0>7d}".format(true_id))) + '.png')
-                except cv2.error:
-                    logger.error(f"{directory}中出现错误，请检查")
-            true_id += 1
-        pool.close()
-        pool.join()
-        # self.engine.savePng(nargout=0)
-        logger.info(f"Work done: {directory} finished, FINAL ID: {true_id} ")
-        print("执行完毕")
+                    done_list = []
+        root_file = []
+        for item in file_list:
+            path = filepath + '/' + item
+            if os.path.isdir(path):
+                if path in done_list:
+                    continue
+                set_parameter(path, savepath, handle_duplicate)
+            elif len(re.findall(r"\.raw$", item)) != 0:
+                root_file.append(item)
+        # print(root_file)
+        if len(root_file) != 0:
+            i = os.path.join(*re.split(r'/', filepath)[4:])
+            print("目标文件夹路径：", i)
+            while i in exist_save:
+                i += str(handle_duplicate)
+                handle_duplicate += 1
+            save_path = os.path.join(savepath, i + 'ScaleRaw')
+            # 会自动在结尾加上一个数字，这个数字不一定是连续的
+            if os.path.exists(save_path):
+                return
+            os.makedirs(save_path)
+            width, height, bit = select_resolution(filepath)
+            if width == height == bit == 0:
+                return
+            process_raw(filepath, save_path, bit, width, height)
         return
+
+
+def process_raw(directory, save_path, bit, width, height):
+    image_list = glob.glob(directory + '/*' + '.raw')
+    number_image = len(image_list)
+    print('即将读取的目录： {},这里有{}张图片，目前设定最多只会读取2000张图片'.format(directory, number_image))
+    iter_time = 2000 if number_image > 2000 else number_image
+    for index in tqdm(range(iter_time)):
+        image = handle_img(dtype=bit, img_path=image_list[index], width=width, height=height)
+        if not isinstance(image, type(None)):
+            cv2.imencode('.png', image)[1].tofile(os.path.join(save_path, 'temp' + '.png'))
+        with open(os.path.join(save_path, 'temp' + '.png'), 'rb') as f:
+            md = hashlib.md5()
+            data = f.read()
+            md.update(data)
+            file_name = md.hexdigest()
+        os.remove(os.path.join(save_path, 'temp' + '.png'))
+        with open(os.path.join(save_path, file_name + '.png'), 'wb') as f:
+            f.write(data)
+    # self.engine.savePng(nargout=0)
+    with open('auto_process.log', 'a+') as f:
+        f.write(f"Work done: {directory} finished \n")
+    # logger.info(f"Work done: {directory} finished")
+    print("执行完毕")
+    return
     # else:
     #     return
 
 
 if __name__ == '__main__':
-    main()
+    # 全局变量，用来应对重名文件过多的问题
+    handle_duplicate = 0
+    pool = multiprocessing.Pool(10)
+    # while True:
+    savepath = input("请输入储存数据的目录（绝对路径）：").replace("\\", '/')
+    workdir = input('输入源文件的绝对路径(直接按回车可以停止脚本): ').replace("\\", '/')
+    if workdir == '':
+        exit(0)
+    for _ in range(10):
+        re = pool.apply_async(set_parameter, (workdir, savepath, handle_duplicate))
+    pool.close()
+    pool.join()
+    # set_parameter(workdir, logger_, savepath, handle_duplicate)
