@@ -33,13 +33,13 @@ class RawFile:
             # plt.show()
             # print(img_guassian)
             if self.dtype == np.uint8:
-                img_gamma = np.power(img / float(np.max(img_guassian)), 0.45)
-                img_gamma = (img_gamma*255).astype('uint8')
-            else:
                 img_gamma = img_guassian
+            else:
+                img_gamma = np.power(img / 4 / float(np.max(img_guassian)), 0.45)
+                img_gamma = (img_gamma * 255).astype('uint8')
             img_guassian = cv2.GaussianBlur(img_gamma, (5, 5), 1)
             img_raw = cv2.resize(img_guassian, dsize=(self.width, self.height), interpolation=cv2.INTER_CUBIC)
-            if self.height > self.width:
+            if self.dtype == np.uint8:
                 img_raw = cv2.transpose(img_raw)
             # img_512 = cv2.cvtColor(img_512, cv2.COLOR_BGR2GRAY)
             # cv2.imshow("image", img_raw)
@@ -66,15 +66,19 @@ class RawFile:
             # plt.imshow(img_guassian, cmap="gray")
             # plt.show()
             # print(img_guassian)
-            img_gamma = np.power(img / float(np.max(img_guassian)), 0.45)
-            img_gamma = (img_gamma*255).astype('uint8')
+            if self.dtype == np.uint8:
+                img_gamma = img_guassian
+            else:
+                img_gamma = np.power(img / 4 / float(np.max(img_guassian)), 0.45)
+                img_gamma = (img_gamma * 255).astype('uint8')
             img_guassian = cv2.GaussianBlur(img_gamma, (5, 5), 1)
             img_raw = cv2.resize(img_guassian, dsize=(self.width, self.height), interpolation=cv2.INTER_CUBIC)
-            img_raw = cv2.transpose(img_raw)
+            if self.dtype == np.uint8:
+                img_raw = cv2.transpose(img_raw)
             # img_raw_cut = img_raw[700:800, 30:1030]
             # cv2.imshow("sad", img_raw_cut)
-            cv2.imshow("originql", img_raw)
-            cv2.waitKey(10)
+            cv2.imshow("original", img_raw)
+            cv2.waitKey(0)
             # img_512 = cv2.cvtColor(img_512, cv2.COLOR_BGR2GRAY)
             # cv2.imshow("image", img_raw)
             # cv2.waitKey(0)
@@ -83,21 +87,21 @@ class RawFile:
             # print((img_512.dtype))
             return img_raw
 
+
 def multiple_working(cls_instance):
     return cls_instance.handle_img()
 
 
 if __name__ == '__main__':
     logger = 1
-    file_path = r'Y:\未整理\点激光\f00012_2000_0_100'
+    file_path = r'\\192.168.2.253\数据集\12.30相贯线相关数据采集\镀锌管\侧放\圆角的扫描\4\2_1500_0_100'
     file_list = os.listdir(file_path)
     for idx, item in enumerate(file_list):
         img_path = os.path.join(file_path, item)
         print(idx, item)
-        data = RawFile(img_path,'uint8',1280,1056,logger)
+        data = RawFile(img_path, 'uint8', 1920, 1056, logger)
         data.handle_img_cut()
     # cv2.imwrite("img.jpg",data)
     # cv2.imshow("img",data)
     # data = np.fromfile(r"D:\matlab-test\auto_test\1440_1056_1.raw", np.uint8)
     # print(data)
-

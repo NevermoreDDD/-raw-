@@ -4,8 +4,7 @@ import re
 import glob
 
 
-
-def main(filepath,save_path):
+def convert2hash(filepath):
     """
     设定需要传入matlab的参数并且调用matlab脚本
     """
@@ -18,7 +17,7 @@ def main(filepath,save_path):
     for item in file_list:
         path = os.path.join(filepath, item)
         if os.path.isdir(path):
-            main(path, save_path)
+            convert2hash(path)
         elif len(re.findall(r"\.png$|\.jpg$", item)) != 0:
             root_file.append(path)
     # print(root_file)
@@ -31,12 +30,15 @@ def main(filepath,save_path):
                 data = f.read()
                 md.update(data)
                 file_name = md.hexdigest()
-            with open(os.path.join(save_path, file_name+'.png'), 'wb') as f:
+            os.remove(image)
+            with open(os.path.join(filepath, file_name + '.png'), 'wb') as f:
                 f.write(data)
     return
 
-print("请输入PNG文件路径（只能处理PNG文件）：")
-filepath = input().replace("\\", "/")
-print("请输入存储路径： ")
-save_path = input().replace("\\", "/")
-main(filepath, save_path)
+
+if __name__ == "__main__":
+    print("请输入PNG文件路径（只能处理PNG文件）：")
+    filepath = input().replace("\\", "/")
+    # print("请输入存储路径： ")
+    # save_path = input().replace("\\", "/")
+    convert2hash(filepath)
