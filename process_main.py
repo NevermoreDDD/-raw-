@@ -204,22 +204,44 @@ def process_raw(directory, logger, save_path, bit, width, height):
     image_list = glob.glob(directory + '/*' + '.raw')
     number_image = len(image_list)
     print('即将读取的目录： {},这里有{}张图片，目前设定最多只会读取2000张图片'.format(directory, number_image))
-    iter_time = 2000 if number_image > 2000 else number_image
-    for index in tqdm(range(iter_time)):
-        raw_handler = RawFile(img_path=image_list[index], dtype=bit, width=width, height=height, logger=logger)
-        image = raw_handler.handle_img()
-        if not isinstance(image, type(None)):
-            cv2.imencode('.png', image)[1].tofile(os.path.join(save_path, 'temp' + '.png'))
-        with open(os.path.join(save_path, 'temp' + '.png'), 'rb') as f:
-            md = hashlib.md5()
-            data = f.read()
-            md.update(data)
-            file_name = md.hexdigest()
-        os.remove(os.path.join(save_path, 'temp' + '.png'))
-        with open(os.path.join(save_path, file_name + '.png'), 'wb') as f:
-            f.write(data)
+    # 这里从日志里面获取编号、给PNG标上
+    log_files = glob.glob(os.getcwd() + "/*" + '.log')
+    try:
+        log_files.sort(key=lambda x: re.findall(r'(?<=auto_process).*(?=.log)', x)[0])
+    except IndexError:
+        pass
+    finally:
+        if len(log_files) != 0:
+            with open(log_files[0], 'r') as l:
+                logs = l.readlines()
+                for index in range(-1, -len(logs) - 1, -1):
+                    try:
+                        img_id = re.findall(r"(?<=FINAL ID: ).*(?= )", logs[index])[-1]
+                    except IndexError:
+                        img_id = 0
+                        continue
+                    else:
+                        break
+        else:
+            img_id = 0
+        true_id = int(img_id)
+        iter_time = 2000 if number_image > 2000 else number_image
+        for index in tqdm(range(iter_time)):
+            raw_handler = RawFile(img_path=image_list[index], dtype=bit, width=width, height=height, logger=logger)
+            image = raw_handler.handle_img()
+            if not isinstance(image, type(None)):
+                cv2.imencode('.png', image)[1].tofile(os.path.join(save_path, 'temp' + '.png'))
+            with open(os.path.join(save_path, 'temp' + '.png'), 'rb') as f:
+                md = hashlib.md5()
+                data = f.read()
+                md.update(data)
+                file_name = md.hexdigest()
+            os.remove(os.path.join(save_path, 'temp' + '.png'))
+            with open(os.path.join(save_path,"{:0>7d}_".format(true_id) + file_name + '.png'), 'wb') as f:
+                f.write(data)
+            true_id += 1
     # self.engine.savePng(nargout=0)
-    logger.info(f"Work done: {directory} finished")
+    logger.info(f"Work done: {directory} finished, FINAL ID: {true_id} ")
     print("执行完毕")
     return
     # else:

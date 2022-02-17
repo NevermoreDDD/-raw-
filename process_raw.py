@@ -3,6 +3,8 @@ import os
 import glob
 import matplotlib.pyplot as plt
 import numpy as np
+import re
+import hashlib
 from PIL import Image
 
 
@@ -94,13 +96,33 @@ def multiple_working(cls_instance):
 
 if __name__ == '__main__':
     logger = 1
-    file_path = r'\\192.168.2.253\数据集\12.30相贯线相关数据采集\镀锌管\侧放\圆角的扫描\4\2_1500_0_100'
-    file_list = os.listdir(file_path)
+    file_path = r'\\192.168.2.253\数据集\新建文件夹\2019_data_raw\2019_data_raw\原著角焊有干扰'
+    # file_list = os.listdir(file_path)
+    file_list = glob.glob(file_path+"/*"+".raw")
     for idx, item in enumerate(file_list):
-        img_path = os.path.join(file_path, item)
-        print(idx, item)
-        data = RawFile(img_path, 'uint8', 1920, 1056, logger)
-        data.handle_img_cut()
+        print(idx, re.split(r"\\", item)[-1])
+        dtype = np.uint16
+        img_data = np.fromfile(item, dtype, count=-1)
+        n = int(img_data.size / 1080 / 1440)
+        width = 1080
+        height = 1440
+        img = img_data.reshape(-1,width,height)
+        os.makedirs(r"\\192.168.2.253\数据集\2.16补充\2019_data_raw\原著角焊有干扰")
+        for _ in range(img.shape[0]):
+            img_cut = img[_, :, :]
+            cv2.imencode('.png', img_cut)[1].tofile(os.path.join(r"\\192.168.2.253\数据集\2.16补充\2019_data_raw"
+                                                                 r"\原著角焊有干扰", 'temp' + '.png'))
+            with open(os.path.join(r"\\192.168.2.253\数据集\2.16补充\2019_data_raw\原著角焊有干扰", 'temp' + '.png'), 'rb') as f:
+                md = hashlib.md5()
+                data = f.read()
+                md.update(data)
+                file_name = md.hexdigest()
+            os.remove(os.path.join(r"\\192.168.2.253\数据集\2.16补充\2019_data_raw\原著角焊有干扰", 'temp' + '.png'))
+            with open(os.path.join(r"\\192.168.2.253\数据集\2.16补充\2019_data_raw\原著角焊有干扰", file_name + '.png'), 'wb') as f:
+                f.write(data)
+        # data = RawFile(img_path, 'uint8', 1920, 1056, logger)
+        # print(round(os.stat(item).st_size / 1080 /1440))
+    #
     # cv2.imwrite("img.jpg",data)
     # cv2.imshow("img",data)
     # data = np.fromfile(r"D:\matlab-test\auto_test\1440_1056_1.raw", np.uint8)

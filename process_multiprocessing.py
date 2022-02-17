@@ -228,7 +228,7 @@ def process_raw(directory, save_path, bit, width, height):
             md.update(data)
             file_name = md.hexdigest()
         os.remove(os.path.join(save_path, 'temp' + '.png'))
-        with open(os.path.join(save_path, file_name + '.png'), 'wb') as f:
+        with open(os.path.join(save_path, file_name + f'{index}.png'), 'wb') as f:
             f.write(data)
     # self.engine.savePng(nargout=0)
     with open('auto_process.log', 'a+') as f:
